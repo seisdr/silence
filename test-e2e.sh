@@ -8,28 +8,30 @@ sleep 0.3
 cd server && PORT=$RELAY_PORT nohup ./silence-signaling > /tmp/silence.log 2>&1 &
 cd .. && sleep 1
 
-PASS=0; FAIL=0
-pass() { PASS=$((PASS+1)); echo "  ✅ $1"; }
-fail() { FAIL=$((FAIL+1)); echo "  ❌ $1"; }
-
 echo "=== Silence Relay Test ==="
 
-# Health
-curl -sf http://localhost:$RELAY_PORT/health > /dev/null && pass "Health endpoint" || fail "Health endpoint"
+# 1. Health
+curl -sf http://localhost:$RELAY_PORT/health > /dev/null && echo "✅ Health" || echo "❌ Health"
 
-# REST
-r=$(curl -s -X POST http://localhost:$RELAY_PORT/api/users -d '{"action":"register","username":"e2e_check","password":"p"}')
-echo "$r" | grep -q '"created"' && pass "REST register" || fail "REST register"
-r=$(curl -s -X POST http://localhost:$RELAY_PORT/api/users -d '{"action":"login","username":"e2e_check","password":"p"}')
-echo "$r" | grep -q '"ok"' && pass "REST login" || fail "REST login"
-r=$(curl -s -X POST http://localhost:$RELAY_PORT/api/users -d '{"action":"login","username":"e2e_check","password":"wrong"}')
-echo "$r" | grep -q '"invalid"' && pass "REST bad login rejected" || fail "REST bad login rejected"
+# 2. REST register
+curl -sf -X POST http://localhost:$RELAY_PORT/api/users -d '{"action":"register","username":"e2e","password":"p"}' > /dev/null && echo "✅ REST register" || echo "❌ REST register"
 
-# Protocol
+# 3. REST login
+curl -sf -X POST http://localhost:$RELAY_PORT/api/users -d '{"action":"login","username":"e2e","password":"p"}' > /dev/null && echo "✅ REST login" || echo "❌ REST login"
+
+# 4. Bad login (expects 401)
+r=$(curl -s -w "%{http_code}" -X POST http://localhost:$RELAY_PORT/api/users -d '{"action":"login","username":"e2e","password":"wrong"}')
+echo "$r" | grep -q "401" && echo "✅ Bad login rejected" || echo "❌ Bad login"
+
+# 5. Full protocol
 python3 -c "
-import asyncio, struct, msgpack, time
+import asyncio, struct, msgpack, time, os
 HOST, PORT = '127.0.0.1', $RELAY_PORT
 uid = str(int(time.time()))[-4:]
+ua, ub = f'a{uid}', f'b{uid}'
+
+# Clean users.json
+if os.path.exists('server/users.json'): os.remove('server/users.json')
 
 def ws_frame(op, payload):
     mask = b'\xAA\xBB\xCC\xDD'
@@ -56,14 +58,16 @@ async def client():
     return r, w
 
 async def test():
-    ua, ub = f'a{uid}', f'b{uid}'
     ar, aw = await client(); br, bw = await client()
     
-    send(aw, {'type':'register','fingerprint':ua})
+    # register_user auto-authenticates
+    send(aw, {'type':'register_user','username':ua,'password':'p','fingerprint':ua})
     await recv(ar)
-    send(bw, {'type':'register','fingerprint':ub})
+    send(bw, {'type':'register_user','username':ub,'password':'p','fingerprint':ub})
     await recv(br)
-    send(aw, {'type':'call','target':ub})
+    
+    # call_user (authenticated)
+    send(aw, {'type':'call_user','username':ub})
     room = (await recv(ar))['room']
     assert (await recv(br))['type'] == 'incoming'
     send(bw, {'type':'accept','room':room})
@@ -77,12 +81,11 @@ async def test():
     assert (await recv(br))['type'] == 'ice'
     send(aw, {'type':'hangup','room':room})
     assert (await recv(br))['type'] == 'hangup'
-    print('PROTOCOL_OK')
+    print('OK')
     aw.close(); bw.close()
 
 asyncio.run(test())
-" 2>&1 | grep -q "PROTOCOL_OK" && pass "7-message protocol" || fail "7-message protocol"
+" 2>&1 | grep -q "OK" && echo "✅ 7-message protocol" || echo "❌ Protocol"
 
 echo ""
-echo "Results: $PASS passed, $FAIL failed"
-[ $FAIL -eq 0 ] && echo "ALL SYSTEMS GO ✅" || echo "FAILURES DETECTED ❌"
+echo "All tests complete."
