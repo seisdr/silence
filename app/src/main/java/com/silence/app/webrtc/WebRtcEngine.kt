@@ -35,6 +35,11 @@ class WebRtcEngine @Inject constructor(
     }
 
     fun initialize() {
+        // Must be set before creating the audio module — Android requires
+        // MODE_IN_COMMUNICATION for VoIP calls to route audio correctly.
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        am.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
+
         val options = PeerConnectionFactory.InitializationOptions.builder(context)
             .createInitializationOptions()
         PeerConnectionFactory.initialize(options)
@@ -48,7 +53,6 @@ class WebRtcEngine @Inject constructor(
             .setOptions(PeerConnectionFactory.Options())
             .setAudioDeviceModule(audioModule)
             .createPeerConnectionFactory()
-
         val ac = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
             mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
