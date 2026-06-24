@@ -22,3 +22,4 @@ server/silence-signaling
 # The placeholder google-services.json is safe to commit (no real keys).
 # After replacing with your real Firebase config, be careful not to
 # commit the real one. Consider: git update-index --assume-unchanged app/google-services.json
+server/users.json
