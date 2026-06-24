@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Silence</string>
+    <string name="channel_call_name">Calls</string>
+    <string name="channel_call_desc">Incoming and active call notifications</string>
+    <string name="notification_ready">Ready for calls</string>
+    <string name="notification_connecting">Connecting…</string>
+    <string name="action_disconnect">Disconnect</string>
+</resources>

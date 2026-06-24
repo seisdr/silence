@@ -1,0 +1,24 @@
+# Android / Gradle
+.gradle/
+build/
+app/build/
+*.apk
+*.aab
+*.ap_
+*.dex
+local.properties
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Server binary
+server/silence-signaling
+
+# Secrets (real google-services.json has API keys)
+# app/google-services.json — the placeholder is safe; don't commit the real one
+
+# The placeholder google-services.json is safe to commit (no real keys).
+# After replacing with your real Firebase config, be careful not to
+# commit the real one. Consider: git update-index --assume-unchanged app/google-services.json

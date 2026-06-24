@@ -1,0 +1,125 @@
+[
+  {
+    "username": "demo_bob",
+    "password_hash": "$2a$10$d802zDSOQyD0zyn/AY7hqegtWWNGbA2JOzDpMPrIwD.bdYqUecCWi",
+    "fingerprint": "fp_demo_bob",
+    "fcm_token": "tok_b"
+  },
+  {
+    "username": "a3",
+    "password_hash": "$2a$10$GzLg58/ddCRvfPVHoOJ56eaeo6q.qUHDtKiEzpWNFynY4km3e/Ieu",
+    "fingerprint": "fp_a3",
+    "fcm_token": "t_a"
+  },
+  {
+    "username": "bob",
+    "password_hash": "$2a$10$IZf7ALbM.hKZC0T.yi3mw.XFyxxzr8FZku3MYjgPNj3EExrIsdQGq",
+    "fingerprint": "fp_bob_789",
+    "fcm_token": "tok_bob"
+  },
+  {
+    "username": "testuser",
+    "password_hash": "$2a$10$YLTFLWFeryDl6uzoVr7/R.SZu1l0dSb0euje00GAygIOBLK9Cz5IW",
+    "fingerprint": "",
+    "fcm_token": ""
+  },
+  {
+    "username": "bob2",
+    "password_hash": "$2a$10$qeZKGvl/BZkVramgmJn0tu0IZo0DbwIqoCWFzMLaUzIaybkivbz96",
+    "fingerprint": "fp_b",
+    "fcm_token": "t_b"
+  },
+  {
+    "username": "final_alice",
+    "password_hash": "$2a$10$wxNYAy1Bg7ta0PFMl1SZ2.ogCwE8FXjTNl.hq52cH8TM3l51Lld.G",
+    "fingerprint": "fp_alice",
+    "fcm_token": "t",
+    "apns_token": "apns_aaa"
+  },
+  {
+    "username": "final_bob",
+    "password_hash": "$2a$10$8Z1m0XHanGh5/rT5vQsmheHeUmgNwyqtyd5Y6Dq0H9qtMJCfEURi.",
+    "fingerprint": "fp_bob",
+    "fcm_token": "t",
+    "apns_token": "apns_bbb"
+  },
+  {
+    "username": "e2e_test",
+    "password_hash": "$2a$10$wJdaSq.9Ms8S.uuPyjqZ/O.884TseTvrXFpGq1wuU8ryMuqVXGxD.",
+    "fingerprint": "",
+    "fcm_token": ""
+  },
+  {
+    "username": "alice",
+    "password_hash": "$2a$10$1SLMt0k8MrROCA7XQ3Z.a./EmnlN3m8ivdj5OTA.3KsUgMa6xyy.a",
+    "fingerprint": "fp_alice_456",
+    "fcm_token": "tok_alice2"
+  },
+  {
+    "username": "ci_test_a",
+    "password_hash": "$2a$10$0e8MtcqUkwGXjlakBlSGoelgMEMx7E2HOBSmyYcDO8JUX/ZGqDolq",
+    "fingerprint": "fp_a",
+    "fcm_token": "t"
+  },
+  {
+    "username": "t2",
+    "password_hash": "$2a$10$/ylFRLReTSltOZsAGyKv2eTR9SNwqWesUmI1kdCOdjb9nxtKfphpC",
+    "fingerprint": "f2",
+    "fcm_token": ""
+  },
+  {
+    "username": "qtest",
+    "password_hash": "$2a$10$dt8vEM1sZM21pG3/Gl9JN.A6XhDX1hcQaebIa6aAIx67o0y1Fham6",
+    "fingerprint": "fp_qtest",
+    "fcm_token": "tok"
+  },
+  {
+    "username": "b3",
+    "password_hash": "$2a$10$8IYjN//UGGGmxgWo.0imr.UMhTWMOEgt/X/ZXP./Whkcl875DPR/K",
+    "fingerprint": "fp_b3",
+    "fcm_token": "t_b"
+  },
+  {
+    "username": "e2e_a",
+    "password_hash": "$2a$10$rXSNT.OjkCadMcPLA.Lhq.i6O4lC4lrMy8QmKlMBvSmcsP3cH7U1.",
+    "fingerprint": "fp_e2e_a",
+    "fcm_token": "t_a"
+  },
+  {
+    "username": "e2e_b",
+    "password_hash": "$2a$10$5nvJwndMPdquBLHV3XwrieUoAnos9RP.s0BH7IcCl8hedE3jbtI4q",
+    "fingerprint": "fp_e2e_b",
+    "fcm_token": "t_b"
+  },
+  {
+    "username": "apns_test",
+    "password_hash": "$2a$10$l.WOiSKRWe2vOI3lGhcvX.nQYG0WOpTICmkupU9QNuYnmBcHtr8aK",
+    "fingerprint": "fp_apns",
+    "fcm_token": "tok",
+    "apns_token": "apns_tok_123"
+  },
+  {
+    "username": "t1",
+    "password_hash": "$2a$10$.LYG4vjD/AIJr/KuakbFzOkuR6.eULvGksTqRg0p8Tvd3ca/gO8HK",
+    "fingerprint": "f1",
+    "fcm_token": ""
+  },
+  {
+    "username": "demo_alice",
+    "password_hash": "$2a$10$GxE6oZxt8vqgXcHFdoCc1OsTCd5dFYJ9m4mqU7gdMl58OnCw21NE.",
+    "fingerprint": "fp_demo_alice",
+    "fcm_token": "tok_a"
+  },
+  {
+    "username": "alice2",
+    "password_hash": "$2a$10$nxI4S2kZPjBoM2UfXd1Eze/qKmh1jvQmzaFEg.t1XEvfVjN0RLuKm",
+    "fingerprint": "fp_a",
+    "fcm_token": "t_a"
+  },
+  {
+    "username": "ci_test_b",
+    "password_hash": "$2a$10$mARel93Emka.mU6T2oeULOFoRsot7t.7.36B5xVymXjXByh4fylOO",
+    "fingerprint": "fp_b",
+    "fcm_token": "t"
+  }
+]
