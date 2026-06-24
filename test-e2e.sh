@@ -1,7 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 RELAY_PORT="${PORT:-8088}"
-echo "=== Silence Relay Test ==="
 
 # Start relay
 pkill -f "silence-signaling.*:$RELAY_PORT" 2>/dev/null || true
@@ -9,28 +8,33 @@ sleep 0.3
 cd server && PORT=$RELAY_PORT nohup ./silence-signaling > /tmp/silence.log 2>&1 &
 cd .. && sleep 1
 
+PASS=0; FAIL=0
+pass() { PASS=$((PASS+1)); echo "  ✅ $1"; }
+fail() { FAIL=$((FAIL+1)); echo "  ❌ $1"; }
+
+echo "=== Silence Relay Test ==="
+
 # Health
-echo -n "1. Health: "
-curl -sf http://localhost:$RELAY_PORT/health && echo ""
+curl -sf http://localhost:$RELAY_PORT/health > /dev/null && pass "Health endpoint" || fail "Health endpoint"
 
-# REST register + login
-echo -n "2. REST register: "
-curl -sf -X POST http://localhost:$RELAY_PORT/api/users \
-  -d '{"action":"register","username":"e2e_test","password":"pass"}' && echo ""
-echo -n "3. REST login: "
-curl -sf -X POST http://localhost:$RELAY_PORT/api/users \
-  -d '{"action":"login","username":"e2e_test","password":"pass"}' && echo ""
+# REST
+r=$(curl -s -X POST http://localhost:$RELAY_PORT/api/users -d '{"action":"register","username":"e2e_check","password":"p"}')
+echo "$r" | grep -q '"created"' && pass "REST register" || fail "REST register"
+r=$(curl -s -X POST http://localhost:$RELAY_PORT/api/users -d '{"action":"login","username":"e2e_check","password":"p"}')
+echo "$r" | grep -q '"ok"' && pass "REST login" || fail "REST login"
+r=$(curl -s -X POST http://localhost:$RELAY_PORT/api/users -d '{"action":"login","username":"e2e_check","password":"wrong"}')
+echo "$r" | grep -q '"invalid"' && pass "REST bad login rejected" || fail "REST bad login rejected"
 
-# Protocol test via Python
-echo "4. Protocol: "
+# Protocol
 python3 -c "
-import asyncio, struct, msgpack
-
+import asyncio, struct, msgpack, time
 HOST, PORT = '127.0.0.1', $RELAY_PORT
-def ws_frame(opcode, payload):
+uid = str(int(time.time()))[-4:]
+
+def ws_frame(op, payload):
     mask = b'\xAA\xBB\xCC\xDD'
     masked = bytes(b ^ mask[i%4] for i,b in enumerate(payload))
-    f = bytearray([0x80|opcode]); n = len(payload)
+    f = bytearray([0x80|op]); n = len(payload)
     if n < 126: f.append(0x80|n)
     f.extend(mask); f.extend(masked)
     return bytes(f)
@@ -52,12 +56,15 @@ async def client():
     return r, w
 
 async def test():
+    ua, ub = f'a{uid}', f'b{uid}'
     ar, aw = await client(); br, bw = await client()
-    send(aw, {'type':'register_user','username':'t1','password':'p','fingerprint':'f1'})
+    
+    send(aw, {'type':'register','fingerprint':ua})
     await recv(ar)
-    send(bw, {'type':'register_user','username':'t2','password':'p','fingerprint':'f2'})
+    send(bw, {'type':'register','fingerprint':ub})
     await recv(br)
-    send(aw, {'type':'call_user','username':'t2'}); room = (await recv(ar))['room']
+    send(aw, {'type':'call','target':ub})
+    room = (await recv(ar))['room']
     assert (await recv(br))['type'] == 'incoming'
     send(bw, {'type':'accept','room':room})
     assert (await recv(br))['type'] == 'joined'
@@ -70,11 +77,12 @@ async def test():
     assert (await recv(br))['type'] == 'ice'
     send(aw, {'type':'hangup','room':room})
     assert (await recv(br))['type'] == 'hangup'
-    print('ALL_PROTOCOL_TESTS_PASSED')
+    print('PROTOCOL_OK')
     aw.close(); bw.close()
 
 asyncio.run(test())
-" 2>&1
+" 2>&1 | grep -q "PROTOCOL_OK" && pass "7-message protocol" || fail "7-message protocol"
 
 echo ""
-echo "✅ All relay tests complete"
+echo "Results: $PASS passed, $FAIL failed"
+[ $FAIL -eq 0 ] && echo "ALL SYSTEMS GO ✅" || echo "FAILURES DETECTED ❌"
