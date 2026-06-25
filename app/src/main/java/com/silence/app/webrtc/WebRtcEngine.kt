@@ -23,6 +23,31 @@ class WebRtcEngine @Inject constructor(
     private var remoteFingerprint: String? = null
     private var engineScope: CoroutineScope? = null
 
+    /** TURN server URL (optional). Set before creating a call. */
+    var turnUrl: String? = null
+
+    // ICE candidate buffering — candidates received before remote description
+    // is set are queued and flushed once setRemoteDescription completes.
+    private val iceBufferLock = Any()
+    private var remoteDescriptionSet = false
+    private val pendingCandidates = mutableListOf<IceCandidate>()
+    private val remoteSdpObserver = object : SdpObserver {
+        override fun onCreateSuccess(p0: SessionDescription?) {}
+        override fun onCreateFailure(p0: String?) {}
+        override fun onSetSuccess() {
+            val toFlush = synchronized(iceBufferLock) {
+                remoteDescriptionSet = true
+                val drained = pendingCandidates.toList()
+                pendingCandidates.clear()
+                drained
+            }
+            toFlush.forEach { peerConnection?.addIceCandidate(it) }
+        }
+        override fun onSetFailure(err: String?) {
+            _events.tryEmit(EngineEvent.Error("setRemoteDescription: $err"))
+        }
+    }
+
     private val _events = MutableSharedFlow<EngineEvent>(extraBufferCapacity = 16)
     val events: SharedFlow<EngineEvent> = _events.asSharedFlow()
 
@@ -94,7 +119,7 @@ class WebRtcEngine @Inject constructor(
         val pc = createPeerConnection() ?: return
         remoteFingerprint = parseFingerprint(sdp)
         val offer = SessionDescription(SessionDescription.Type.OFFER, sdp)
-        pc.setRemoteDescription(noopSdpObserver, offer)
+        pc.setRemoteDescription(remoteSdpObserver, offer)
 
         val constraints = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
@@ -116,11 +141,14 @@ class WebRtcEngine @Inject constructor(
     fun handleAnswer(sdp: String) {
         remoteFingerprint = parseFingerprint(sdp)
         val answer = SessionDescription(SessionDescription.Type.ANSWER, sdp)
-        peerConnection?.setRemoteDescription(noopSdpObserver, answer)
+        peerConnection?.setRemoteDescription(remoteSdpObserver, answer)
     }
-
     fun addIceCandidate(sdpMid: String, sdpMLineIndex: Int, sdp: String) {
-        peerConnection?.addIceCandidate(IceCandidate(sdpMid, sdpMLineIndex, sdp))
+        val candidate = IceCandidate(sdpMid, sdpMLineIndex, sdp)
+        val pc = peerConnection ?: return
+        synchronized(iceBufferLock) {
+            if (remoteDescriptionSet) pc.addIceCandidate(candidate) else pendingCandidates.add(candidate)
+        }
     }
 
     fun endCall() {
@@ -130,6 +158,13 @@ class WebRtcEngine @Inject constructor(
         remoteFingerprint = null
         engineScope?.cancel()
         engineScope = null
+        synchronized(iceBufferLock) {
+            remoteDescriptionSet = false
+            pendingCandidates.clear()
+        }
+        // MODE_IN_COMMUNICATION persists after the call; reset so other audio
+        // (media, ringtones) routes normally again.
+        (context.getSystemService(Context.AUDIO_SERVICE) as AudioManager).mode = AudioManager.MODE_NORMAL
         _events.tryEmit(EngineEvent.CallEnded)
     }
 
@@ -153,11 +188,23 @@ class WebRtcEngine @Inject constructor(
     private fun createPeerConnection(): PeerConnection? {
         if (peerConnection != null) return peerConnection
         if (peerConnectionFactory == null) return null
+        synchronized(iceBufferLock) { remoteDescriptionSet = false; pendingCandidates.clear() }
         engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-        val iceServers = listOf(
+        val iceServers = mutableListOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
         )
+        turnUrl?.let { url ->
+            val m = Regex("turn://([^:]+):(.+?)@(.+)").find(url)
+            if (m != null) {
+                val (user, pass, host) = m.destructured
+                iceServers.add(PeerConnection.IceServer.builder("turn:$host")
+                    .setUsername(user).setPassword(pass).createIceServer())
+            } else {
+                iceServers.add(PeerConnection.IceServer.builder("turn:$url").createIceServer())
+            }
+        }
+
         val config = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
@@ -182,6 +229,7 @@ class WebRtcEngine @Inject constructor(
             override fun onAddTrack(p0: RtpReceiver?, p1: Array<out MediaStream>?) {}
             override fun onIceCandidateError(p0: IceCandidateErrorEvent?) {}
             override fun onStandardizedIceConnectionChange(p0: PeerConnection.IceConnectionState?) {}
+
             override fun onConnectionChange(p0: PeerConnection.PeerConnectionState?) {}
         })
         audioTrack?.let { peerConnection?.addTrack(it, listOf()) }

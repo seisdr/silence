@@ -21,7 +21,7 @@ Alice ──P2P DTLS-SRTP (encrypted audio)── Bob
 | Layer | Key | Lifetime | Purpose |
 |-------|-----|----------|---------|
 | Identity | X25519 keypair | Forever | Trust anchor. QR exchange. |
-| Session | DTLS certificate | Per call | Authenticates WebRTC handshake. Fingerprint compared to identity. |
+| Session | DTLS certificate | Per call | Secures the WebRTC media handshake (DTLS-SRTP). Ephemeral, per call — not bound to the X25519 identity. |
 | Media | SRTP session key | Per call | Encrypts audio. Derived from ECDHE. Relay never sees it. |
 
 The relay is a matchmaker — it stores `fingerprint → WebSocket connection`, creates rooms for calls, and forwards SDP/ICE until peers connect. After that, audio is P2P. The relay knows *that* Alice called Bob, but cannot decrypt *what* they said.
@@ -209,11 +209,12 @@ Caller                         Relay                         Callee
 | Surface | Protected By | Risk |
 |---------|-------------|------|
 | Audio interception | DTLS-SRTP (P2P, relay never sees keys) | None |
-| MITM (relay) | DTLS fingerprint compared to stored X25519 identity | Detected |
+| MITM (relay, identity) | Identity SAS (SHA-256 over both X25519 keys) confirms the remote identity matches a QR-trusted contact | Identity confirmed |
+| MITM (relay, media path) | DTLS-SRTP cert is ephemeral and not bound to the identity | **Not detected** — active DTLS relay possible (see Known Gaps) |
 | MITM (QR exchange) | Physical presence verification | Practical impossibility |
 | Account brute force | bcrypt cost 10 (~100ms/attempt) | Slow but possible |
 | Credential theft (device) | DataStore plaintext (should use Keystore) | Rooted device |
-| Signaling metadata | Plaintext WebSocket (should use WSS) | Network observer |
+| Signaling metadata | Optional WSS via TLS_CERT/TLS_KEY; plain WS by default | Network observer if WSS off |
 | Relay compromise | No audio keys on relay, no user PII | Limited to metadata |
 
 ### Known Security Gaps
@@ -222,9 +223,8 @@ Caller                         Relay                         Callee
 |-----|----------|-----|
 | Password stored in DataStore plaintext | Medium | Android Keystore / EncryptedSharedPreferences |
 | No login rate limiting | Medium | Exponential backoff or IP-based limiting |
-| Signaling is plaintext WebSocket | Low | Add TLS (WSS) support to relay |
+| Active media-path (DTLS) MITM | Medium | Bind the DTLS certificate to the X25519 identity (persistent `RTCCertificate`) so the DTLS fingerprint becomes a stable function of identity, then TOFU/verify |
 | 64-bit truncated fingerprint (2^32 birthday) | Low | Impractical for in-person QR exchange; matches Signal safety numbers |
-| `users.json` concurrent write TOCTOU | Low | Write to temp file + atomic rename |
 
 ---
 
@@ -250,8 +250,14 @@ go build -o silence-signaling .
 ### 2. Test the relay protocol
 
 ```bash
-# Start relay
+# Start relay (plain HTTP, fastest for local testing)
 PORT=8088 ./silence-signaling &
+
+# …or HTTPS/WSS (for real mobile clients):
+# openssl req -x509 -newkey rsa:2048 -nodes -keyout server/tls/key.pem \
+#   -out server/tls/cert.pem -days 825 -subj "/CN=localhost" \
+#   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+# PORT=8088 TLS_CERT=server/tls/cert.pem TLS_KEY=server/tls/key.pem ./silence-signaling &
 
 # Run protocol test (no device needed)
 ./test-e2e.sh
@@ -314,6 +320,8 @@ open Package.swift  # Opens in Xcode
 | Variable | Required | Purpose |
 |----------|----------|---------|
 | `PORT` | No | Listen port (default 8080) |
+| `TLS_CERT` | No | Path to TLS cert; enables HTTPS/WSS when set with `TLS_KEY` |
+| `TLS_KEY` | No | Path to TLS private key; enables HTTPS/WSS when set with `TLS_CERT` |
 | `FCM_SERVER_KEY` | No | Firebase Cloud Messaging server key |
 | `APNS_KEY_ID` | No | Apple Push Notification key ID |
 | `APNS_TEAM_ID` | No | Apple Developer team ID |
@@ -415,12 +423,9 @@ PORT=8080 /opt/silence/silence-signaling &
 | Issue | Severity | Fix |
 |-------|----------|-----|
 | No login rate limiting | Medium | Exponential backoff |
-| `users.json` TOCTOU on write | Medium | Temp file + atomic rename |
 | Debug logging left on | Low | Remove `log.Printf` in readPump |
-| No TLS/WSS | Low | TLS certificate + `http.ListenAndServeTLS` |
 | REST API no auth | Low | API key or token auth |
 | No graceful shutdown | Low | SIGTERM handler + drain |
-| No message size limits | Low | `io.LimitReader` wrapper |
 
 ---
 

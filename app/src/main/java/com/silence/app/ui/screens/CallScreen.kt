@@ -35,6 +35,7 @@ fun CallScreen(
     e2eeFingerprint: String?,
     muted: Boolean,
     speakerOn: Boolean,
+    callDuration: String,
     onHangup: () -> Unit,
     onToggleMute: () -> Unit,
     onToggleSpeaker: () -> Unit,
@@ -89,14 +90,25 @@ fun CallScreen(
                 callState == CallStateUi.RINGING -> "Incoming call"
                 callState == CallStateUi.ENDED -> "Call ended"
                 e2eeVerified -> "E2E Encrypted \u2022 Verified"
-                callState == CallStateUi.CONNECTED -> "Encrypted \u2022 Verifying…"
+            callState == CallStateUi.CONNECTED -> "Encrypted \u2022 Identity unknown"
                 else -> ""
             },
-            style = MaterialTheme.typography.bodyMedium,
             color = Color.White.copy(alpha = 0.85f)
         )
 
-        if (e2eeFingerprint != null && !e2eeVerified && callState == CallStateUi.CONNECTED) {
+        if (callDuration.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = callDuration,
+                style = MaterialTheme.typography.displaySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 4.sp
+                ),
+                color = Color.White.copy(alpha = 0.9f)
+            )
+        }
+
+        if (e2eeFingerprint != null && callState == CallStateUi.CONNECTED) {
             Spacer(modifier = Modifier.height(16.dp))
             // Show fingerprint for manual comparison
             Card(
@@ -108,7 +120,7 @@ fun CallScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "Remote fingerprint",
+                        text = "Security code",
                         style = MaterialTheme.typography.labelMedium,
                         color = Color.White.copy(alpha = 0.7f)
                     )
@@ -122,7 +134,7 @@ fun CallScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Compare with your contact's fingerprint\nto verify this call is truly E2E encrypted.",
+                        text = "Both participants see the same code.\nCompare to confirm you're talking to your contact.",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White.copy(alpha = 0.5f)
                     )

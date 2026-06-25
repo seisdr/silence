@@ -27,4 +27,14 @@ struct Identity {
         let hash = SHA256.hash(data: pubKey)
         return hash.prefix(8).map { String(format: "%02x", $0) }.joined()
     }
+
+    /// Symmetric Short Authentication String: SHA-256 over the sorted
+    /// concatenation of both identity public keys (base64). Both ends compute
+    /// the identical string, so it is valid for manual comparison. Stable across
+    /// calls, unlike the per-call DTLS-SRTP certificate fingerprint.
+    static func sas(local: String, remote: String) -> String {
+        let (a, b) = local <= remote ? (local, remote) : (remote, local)
+        let hash = SHA256.hash(data: Data((a + b).utf8))
+        return hash.prefix(16).map { String(format: "%02x", $0) }.joined() // 128-bit
+    }
 }

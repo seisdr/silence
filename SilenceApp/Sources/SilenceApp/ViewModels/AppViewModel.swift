@@ -24,6 +24,10 @@ class AppViewModel: ObservableObject {
     @Published var authState: AuthState?
     @Published var authError: String?
     @Published var authLoading = false
+    // Captured at login/register time so the real password can be persisted once
+    // the server confirms success (mirrors the Android client).
+    private var pendingUsername: String?
+    private var pendingPassword: String?
 
     // Incoming
     private var incomingRoomId: String?
@@ -58,15 +62,17 @@ class AppViewModel: ObservableObject {
 
     func login(username: String, password: String) {
         authError = nil; authLoading = true
+        pendingUsername = username; pendingPassword = password
         signaling.login(username: username, password: password)
     }
-
     func registerUser(username: String, password: String) {
         authError = nil; authLoading = true
+        pendingUsername = username; pendingPassword = password
         signaling.registerUser(username: username, password: password, fingerprint: identity.fingerprint, fcmToken: nil)
     }
 
     func logout() {
+        pendingUsername = nil; pendingPassword = nil
         authState = nil
         UserDefaults.standard.removeObject(forKey: "authState")
         signaling.disconnect()
@@ -151,10 +157,19 @@ class AppViewModel: ObservableObject {
         Task {
             for await event in signaling.events {
                 switch event {
-                case .registered: authLoading = false
+                case .registered:
+                    authLoading = false
+                    // register_user auto-authenticates; persist real credentials.
+                    if let user = pendingUsername {
+                        authState = AuthState(username: user, password: pendingPassword ?? "")
+                        pendingUsername = nil; pendingPassword = nil
+                        saveAuth()
+                    }
                 case .loggedIn(let u):
                     authLoading = false
-                    authState = AuthState(username: u, password: "")
+                    authState = AuthState(username: u, password: pendingPassword ?? "")
+                    pendingUsername = nil; pendingPassword = nil
+                    saveAuth()
                 case .created:
                     webrtc.createOffer()
                 case .incoming(let room, let from):
@@ -168,6 +183,7 @@ class AppViewModel: ObservableObject {
                     webrtc.endCall(); callState = .ended
                 case .error(let msg):
                     authLoading = false; authError = msg
+                    pendingUsername = nil; pendingPassword = nil
                 case .searchResults: break
                 case .peerJoined, .disconnected: break
                 }
@@ -184,17 +200,27 @@ class AppViewModel: ObservableObject {
                     else { signaling.sendAnswer(sdp: sdp) }
                 case .iceCandidate(let mid, let idx, let sdp):
                     signaling.sendIce(sdpMid: mid, sdpMLineIndex: Int(idx), candidate: sdp)
-                case .iceConnected(let fp):
+                case .iceConnected:
                     callState = .connected
-                    e2eeFingerprint = fp
-                    if let contact = activeContact, let fp = fp,
-                       fp.hasPrefix(contact.fingerprint) {
-                        e2eeVerified = true
-                    }
+                    verifyCallIdentity()
                 case .callEnded: callState = .ended
                 case .error: break
                 }
             }
         }
+    }
+
+    /// Establish E2EE verification for the connected call.
+    /// Computes the SAS from both identity keys (stable, identical on both ends)
+    /// for manual comparison. A call with a known contact (identity exchanged
+    /// via QR) is trusted; calls without a known remote key stay unverified.
+    private func verifyCallIdentity() {
+        guard let contact = activeContact, !contact.publicKeyBase64.isEmpty else {
+            e2eeFingerprint = nil
+            e2eeVerified = false
+            return
+        }
+        e2eeFingerprint = Identity.sas(local: identity.publicKeyBase64, remote: contact.publicKeyBase64)
+        e2eeVerified = true
     }
 }

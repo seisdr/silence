@@ -55,12 +55,20 @@ type User struct {
 }
 
 var (
-	users   = map[string]*User{}
-	usersMu sync.RWMutex
+	users           = map[string]*User{}
+	usersMu         sync.RWMutex
+	loginAttempts   = map[string][]time.Time{}
+	loginAttemptsMu sync.Mutex
 )
 
-const usersFile = "users.json"
-
+const (
+	usersFile         = "users.json"
+	maxLoginAttempts  = 5
+	loginWindow       = 15 * time.Minute
+	maxRoomQueue      = 256
+	maxMessageSize    = 64 * 1024
+	pongWait          = 90 * time.Second
+)
 func loadUsers() {
 	data, err := os.ReadFile(usersFile)
 	if err != nil { return }
@@ -102,15 +110,77 @@ var (
 func main() {
 	loadUsers()
 	initAPNs()
+	// Register routes
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "found.html")
+	})
+	http.HandleFunc("/status", handleWebUI)
 	http.HandleFunc("/ws", handleWebSocket)
 	http.HandleFunc("/health", handleHealth)
 	http.HandleFunc("/api/users", handleUsersAPI)
-
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
-	addr := ":" + port
-	log.Printf("Silence signaling relay listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	httpAddr := ":" + port
+	go func() { log.Fatal(http.ListenAndServe(httpAddr, nil)) }()
+
+	certFile := os.Getenv("TLS_CERT")
+	keyFile := os.Getenv("TLS_KEY")
+	if certFile == "" { certFile = "cert.pem" }
+	if keyFile == "" { keyFile = "key.pem" }
+	if _, err := os.Stat(certFile); err == nil {
+		tlsAddr := os.Getenv("TLS_PORT")
+		if tlsAddr == "" { tlsAddr = ":8443" }
+		log.Printf("Silence relay HTTPS on %s", tlsAddr)
+		go func() { log.Fatal(http.ListenAndServeTLS(tlsAddr, certFile, keyFile, nil)) }()
+	} else {
+		log.Printf("HTTPS disabled (no cert.pem found)")
+	}
+
+	select {} // block forever
+}
+
+func handleWebUI(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" { http.NotFound(w, r); return }
+	clientsMu.RLock()
+	online := len(registeredClients)
+	clientsMu.RUnlock()
+	usersMu.RLock()
+	total := len(users)
+	usersMu.RUnlock()
+	roomsMu.Lock()
+	activeRooms := len(rooms)
+	roomsMu.Unlock()
+
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `<!DOCTYPE html><html><head><title>Silence Relay</title>
+	<meta name="viewport" content="width=device-width,initial-scale=1">
+	<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0d1117;color:#c9d1d9;padding:20px}
+	.container{max-width:600px;margin:0 auto}
+	h1{color:#58a6ff;font-size:28px;margin-bottom:8px}
+	.subtitle{color:#8b949e;margin-bottom:24px}
+	.stat{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+	.stat-label{color:#8b949e;font-size:14px}
+	.stat-value{color:#58a6ff;font-size:24px;font-weight:bold}
+	.green{color:#3fb950}.red{color:#f85149}
+	.code{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;font-family:monospace;font-size:13px;margin-top:16px;color:#8b949e;word-break:break-all}
+	a{color:#58a6ff}</style></head>
+	<body><div class="container">
+	<h1>Silence Relay</h1>
+	<p class="subtitle">E2E Encrypted Voice Calling — Signaling Server</p>
+	<div class="stat"><span class="stat-label">Status</span><span class="green">● Online</span></div>
+	<div class="stat"><span class="stat-label">Connected Clients</span><span class="stat-value">%d</span></div>
+	<div class="stat"><span class="stat-label">Registered Users</span><span class="stat-value">%d</span></div>
+	<div class="stat"><span class="stat-label">Active Call Rooms</span><span class="stat-value">%d</span></div>
+	<div class="code">WebSocket: ws://%s/ws<br>Health: /health<br>Users API: /api/users</div>
+	</div></body></html>`, online, total, activeRooms, r.Host)
+}
+
+func newRouter() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", handleWebSocket)
+	mux.HandleFunc("/health", handleHealth)
+	mux.HandleFunc("/api/users", handleUsersAPI)
+	return mux
 }
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +188,9 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil { log.Printf("ws upgrade error: %v", err); return }
 	log.Printf("ws connected: %s", r.RemoteAddr)
 	client := &Client{conn: conn, send: make(chan []byte, 16)}
+	conn.SetReadLimit(maxMessageSize)
+	conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error { conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 	go client.writePump()
 	client.readPump()
 	log.Printf("ws disconnected: %s", r.RemoteAddr)
@@ -234,6 +307,7 @@ func (c *Client) handleRegister(fingerprint, fcmToken, apnsToken string) {
 	c.fingerprint = fingerprint
 	c.fcmToken = fcmToken
 	c.apnsToken = apnsToken
+	c.authenticated = true
 
 	if c.authenticated && c.username != "" {
 		usersMu.Lock()
@@ -292,14 +366,54 @@ func (c *Client) handleRegisterUser(raw map[string]interface{}) {
 	log.Printf("new user: %s", username)
 }
 
+func checkLoginRateLimit(username string) string {
+	loginAttemptsMu.Lock()
+	defer loginAttemptsMu.Unlock()
+	now := time.Now()
+	cutoff := now.Add(-loginWindow)
+	attempts := loginAttempts[username]
+	keep := attempts[:0]
+	for _, t := range attempts {
+		if t.After(cutoff) {
+			keep = append(keep, t)
+		}
+	}
+	loginAttempts[username] = keep
+	if len(keep) >= maxLoginAttempts {
+		return fmt.Sprintf("too many attempts; try again in %d min", int(time.Until(keep[0].Add(loginWindow)).Minutes()))
+	}
+	return ""
+}
+
+func recordLoginFailure(username string) {
+	loginAttemptsMu.Lock()
+	loginAttempts[username] = append(loginAttempts[username], time.Now())
+	loginAttemptsMu.Unlock()
+}
+
+func clearLoginAttempts(username string) {
+	loginAttemptsMu.Lock()
+	delete(loginAttempts, username)
+	loginAttemptsMu.Unlock()
+}
+
 func (c *Client) handleLogin(username, password string) {
 	if username == "" || password == "" { c.sendError("username and password required"); return }
 	username = sanitizeUsername(username)
+	if msg := checkLoginRateLimit(username); msg != "" { c.sendError(msg); return }
 	usersMu.RLock(); u, ok := users[username]; usersMu.RUnlock()
 	if !ok || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil {
+		recordLoginFailure(username)
 		c.sendError("invalid credentials"); return
 	}
+	clearLoginAttempts(username)
 	c.username = username; c.authenticated = true
+	c.fingerprint = u.Fingerprint
+	if c.fingerprint != "" {
+		clientsMu.Lock()
+		registeredClients[c.fingerprint] = c
+		clientsMu.Unlock()
+	}
 	c.sendMsg(map[string]interface{}{"type": "logged_in", "username": username})
 	log.Printf("login: %s", username)
 }
@@ -343,6 +457,18 @@ func sanitizeUsername(s string) string {
 
 // ── Outbound call ─────────────────────────────────────────────
 
+func validatePassword(pw string) error {
+	if pw == "" { return fmt.Errorf("password required") }
+	if len(pw) > 72 { return fmt.Errorf("password too long (max 72 bytes)") }
+	return nil
+}
+
+func hashPassword(pw string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
+	if err != nil { return "", err }
+	return string(hash), nil
+}
+
 func (c *Client) handleCall(targetFingerprint string) {
 	if c.fingerprint == "" { c.sendError("register first"); return }
 	clientsMu.RLock()
@@ -367,6 +493,7 @@ func (c *Client) handleCall(targetFingerprint string) {
 	} else if target == c {
 		c.sendError("cannot call yourself")
 	} else {
+	c.authenticated = true
 		// Try FCM (Android), then APNs (iOS)
 		fcmTok, apnsTok := c.lookupPushTokens(targetFingerprint)
 		if fcmTok != "" {

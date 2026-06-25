@@ -1,7 +1,7 @@
 package com.silence.app.signaling
 
+import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
-import com.silence.app.service.FcmService
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -155,20 +155,23 @@ class SignalingClient @Inject constructor() {
     // ── internal ──────────────────────────────────────────────
 
     private suspend fun fetchFcmToken(): String? {
-        return suspendCancellableCoroutine { cont ->
-            FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-                if (task.isSuccessful && task.result != null) {
-                    cont.resume(task.result)
-                } else {
-                    // Try the callback path (onNewToken may not have fired yet)
-                    FcmService.onToken { token ->
-                        if (cont.isActive) cont.resume(token)
+        // FCM is optional — only used to wake an offline callee. If Firebase
+        // isn't configured (placeholder google-services.json) or the token fetch
+        // fails, register without a token; online-only call delivery still works.
+        return try {
+            val apiKey = FirebaseApp.getInstance().options.apiKey
+            if (apiKey.isNullOrBlank() || apiKey.contains("REPLACE")) return null
+            suspendCancellableCoroutine { cont ->
+                FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                    if (task.isSuccessful && !task.result.isNullOrBlank() && cont.isActive) {
+                        cont.resume(task.result)
+                    } else if (cont.isActive) {
+                        cont.resume(null)
                     }
-                    // Also try the synchronous path
-                    val cached = task.result
-                    if (cached != null && cont.isActive) cont.resume(cached)
                 }
             }
+        } catch (e: Exception) {
+            null
         }
     }
 

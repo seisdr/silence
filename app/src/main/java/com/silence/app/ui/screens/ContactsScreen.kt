@@ -32,7 +32,8 @@ fun ContactsScreen(
     onCall: (Contact) -> Unit,
     onCallUser: (String) -> Unit,
     onAddContact: () -> Unit,
-    onViewIdentity: () -> Unit
+    onViewIdentity: () -> Unit,
+    onDeleteContact: (Contact) -> Unit
 ) {
     var showDeleteDialog by remember { mutableStateOf<Contact?>(null) }
 
@@ -64,6 +65,25 @@ fun ContactsScreen(
             modifier = Modifier.padding(horizontal = 20.dp)
         )
         Spacer(modifier = Modifier.height(16.dp))
+        // Call by username (lets you call someone without a scanned QR contact)
+        var callUser by remember { mutableStateOf("") }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = callUser,
+                onValueChange = { callUser = it.lowercase().filter { c -> c.isLetterOrDigit() || c == '_' } },
+                label = { Text("Call username") },
+            singleLine = true,
+            modifier = Modifier.weight(1f)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+                onClick = { onCallUser(callUser.trim()); callUser = "" },
+            enabled = callUser.isNotBlank()
+            ) { Text("Call") }
+        }
 
         if (contacts.isEmpty()) {
             // Empty state
@@ -136,7 +156,7 @@ fun ContactsScreen(
             title = { Text("Remove ${contact.name}?") },
             text = { Text("You'll need to scan their QR code again to re-add them.") },
             confirmButton = {
-                TextButton(onClick = { showDeleteDialog = null }) {
+                TextButton(onClick = { onDeleteContact(contact); showDeleteDialog = null }) {
                     Text("Remove", color = MaterialTheme.colorScheme.error)
                 }
             },
@@ -209,8 +229,10 @@ private fun ContactRow(
     }
 }
 
+// Contact fingerprint for display. MUST match IdentityManager.fingerprint
+// (first 8 bytes / 16 hex chars) so it aligns with the user's own fingerprint.
 private fun fingerprint(pubB64: String): String {
     val hash = java.security.MessageDigest.getInstance("SHA-256")
         .digest(android.util.Base64.decode(pubB64, android.util.Base64.NO_WRAP))
-    return hash.take(4).joinToString("") { "%02x".format(it) }
+    return hash.take(8).joinToString("") { "%02x".format(it) }
 }

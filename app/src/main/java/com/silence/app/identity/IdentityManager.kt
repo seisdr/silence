@@ -18,8 +18,10 @@ import javax.inject.Singleton
  * Generates an X25519 keypair on first launch. The public key acts as the
  * user's identity. Contacts are other public keys — exchanged via QR code.
  *
- * When a WebRTC call starts, we verify the DTLS-SRTP certificate fingerprint
- * against the stored contact identity to prevent MITM by the signaling relay.
+ * Call verification uses a Short Authentication String (sas()) derived from
+ * both parties' identity keys: it confirms the remote identity (the key
+ * exchanged via QR). It does not by itself detect an active DTLS media-path
+ * relay; that would require binding the DTLS certificate to this identity.
  */
 @Singleton
 class IdentityManager @Inject constructor(
@@ -76,6 +78,22 @@ class IdentityManager @Inject constructor(
     fun fingerprint(pubKey: ByteArray): String {
         val hash = MessageDigest.getInstance("SHA-256").digest(pubKey)
         return hash.take(8).joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Symmetric Short Authentication String for two X25519 identities.
+     *
+     * SHA-256 over the sorted concatenation of both identity public keys (base64),
+     * so both ends compute the identical string — valid for manual comparison.
+     * Stable across calls (identity keys are long-term), unlike the per-call
+     * DTLS-SRTP certificate fingerprint.
+     */
+    fun sas(remotePubKeyB64: String): String {
+        val localB64 = _identity.value?.publicKeyB64 ?: return ""
+        if (remotePubKeyB64.isEmpty()) return ""
+        val (a, b) = if (localB64 <= remotePubKeyB64) localB64 to remotePubKeyB64 else remotePubKeyB64 to localB64
+        val hash = MessageDigest.getInstance("SHA-256").digest((a + b).toByteArray(Charsets.UTF_8))
+        return hash.take(16).joinToString("") { "%02x".format(it) } // 128-bit, 32 hex chars
     }
 
     companion object {

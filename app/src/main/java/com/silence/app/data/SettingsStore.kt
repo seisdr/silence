@@ -29,6 +29,6 @@ class SettingsStore @Inject constructor(
     }
 
     companion object {
-        const val DEFAULT_SIGNALING_URL = "ws://10.0.2.2:8088/ws" // emulator → host
+        const val DEFAULT_SIGNALING_URL = "ws://45.83.179.102:8088/ws" // public relay host
     }
 }

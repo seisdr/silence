@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Silence — encrypted calls</title>
+<style>
+/* ── design tokens (OKLCH) ─────────────────────────────────────────── */
+:root{
+ --bg:        oklch(0.155 0.012 245);
+ --surface:   oklch(0.205 0.013 245);
+ --surface-2: oklch(0.245 0.012 245);
+ --border:    oklch(0.305 0.013 245 / 0.9);
+ --ink:       oklch(0.965 0.004 245);
+ --ink-2:     oklch(0.78  0.012 245);
+ --muted:     oklch(0.68  0.013 245);
+ --accent:    oklch(0.78  0.14  155);
+ --accent-2:  oklch(0.68  0.16  155);
+ --danger:    oklch(0.70  0.18  25);
+ --warn:      oklch(0.82  0.14  80);
+ --focus:     oklch(0.80  0.16  200 / 0.55);
+ --r:         10px;
+ --r-sm:      6px;
+ --r-lg:      14px;
+ --t:         180ms cubic-bezier(0.22, 1, 0.36, 1);
+ --shadow-1:  0 1px 0 oklch(1 0 0 / 0.04) inset, 0 1px 2px oklch(0 0 0 / 0.4);
+ --shadow-2:  0 8px 24px oklch(0 0 0 / 0.45), 0 2px 6px oklch(0 0 0 / 0.35);
+ --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+ --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-reduced-motion: reduce){ :root{ --t: 1ms } }
+
+/* ── base ────────────────────────────────────────────────────────── */
+*,*::before,*::after{ box-sizing:border-box }
+html,body{ margin:0; padding:0 }
+body{
+ background: var(--bg);
+ color: var(--ink);
+ font-family: var(--sans);
+ font-size: 15px;
+ line-height: 1.55;
+ -webkit-font-smoothing: antialiased;
+ text-rendering: optimizeLegibility;
+ min-height: 100dvh;
+ display: grid;
+ place-items: start center;
+ padding: clamp(20px, 5vw, 56px) 16px 64px;
+}
+h1,h2,h3{ margin:0; font-weight:600; letter-spacing:-0.015em }
+.mono,.mono *{ font-family: var(--mono); font-feature-settings:"ss01","cv11" }
+.sr{ position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0 }
+
+/* ── shell ────────────────────────────────────────────────────────── */
+.app{ width:100%; max-width: 420px; display:flex; flex-direction:column; gap:14px }
+.brand{ display:flex; align-items:center; gap:10px; color:var(--ink-2); font-weight:500 }
+.brand .mark{ width:22px; height:22px; border-radius:50%;
+ background: radial-gradient(circle at 30% 30%, oklch(0.85 0.16 155 / 0.9), oklch(0.55 0.16 155) 70%);
+ box-shadow: 0 0 0 4px oklch(0.78 0.14 155 / 0.10);
+}
+.brand .name{ font-size:0.95rem; margin-right:auto }
+.brand .name strong{ color:var(--ink); font-weight:600 }
+
+/* ── card ─────────────────────────────────────────────────────────── */
+.card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:18px; box-shadow: var(--shadow-1) }
+.card-title{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:12px }
+.card-title h2{ margin:0; font-size:1rem; color:var(--ink-2); font-weight:500 }
+.card-title .hint{ color:var(--muted); font-size:12.5px }
+
+/* ── forms ────────────────────────────────────────────────────────── */
+.field{ display:flex; flex-direction:column; gap:6px; margin-bottom:10px }
+.field label{ color:var(--ink-2); font-size:12.5px; font-weight:500 }
+.field .control{ position:relative }
+.field input{
+ width:100%; background:var(--surface-2); color:var(--ink);
+ border:1px solid var(--border); border-radius:var(--r);
+ padding:10px 12px; font:inherit; outline:0;
+ transition: border-color var(--t), background var(--t), box-shadow var(--t);
+ -webkit-appearance:none; appearance:none;
+}
+.field input::placeholder{ color:var(--muted) }
+.field input:hover{ border-color: oklch(0.38 0.014 245) }
+.field input:focus{ border-color: var(--accent); box-shadow: 0 0 0 4px var(--focus); background: oklch(0.26 0.013 245) }
+.field input[aria-invalid="true"]{ border-color: var(--danger) }
+.field .prefix{ position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--muted); font-size:12.5px; pointer-events:none }
+
+/* ── buttons ──────────────────────────────────────────────────────── */
+.btn{ appearance:none; border:0; outline:0; cursor:pointer;
+ display:inline-flex; align-items:center; justify-content:center; gap:8px;
+ height:38px; padding:0 14px; border-radius:var(--r); font:inherit; font-weight:600;
+ background:var(--surface-2); color:var(--ink);
+ transition: background var(--t), transform var(--t), opacity var(--t), box-shadow var(--t);
+ -webkit-tap-highlight-color: transparent;
+}
+.btn:hover{ background: oklch(0.28 0.013 245) }
+.btn:active{ transform: translateY(1px) }
+.btn:focus-visible{ box-shadow: 0 0 0 4px var(--focus) }
+.btn[disabled]{ opacity:0.5; cursor:not-allowed }
+.btn.primary{ background:var(--accent); color: oklch(0.15 0.04 155) }
+.btn.primary:hover{ background: var(--accent-2) }
+.btn.ghost{ background:transparent; border:1px solid var(--border) }
+.btn.ghost:hover{ background: var(--surface-2) }
+.btn.danger{ background: var(--danger); color: oklch(0.98 0.01 25) }
+.btn.danger:hover{ background: oklch(0.65 0.20 25) }
+.btn.success{ background: var(--accent); color: oklch(0.15 0.04 155) }
+.btn.icon{ width:44px; padding:0 }
+.btn.lg{ height:48px; padding:0 18px; font-size:15px }
+.btn.full{ width:100% }
+.btn .spinner{ width:14px; height:14px; border-radius:50%; border:2px solid currentColor; border-right-color:transparent; animation: spin 0.8s linear infinite }
+@keyframes spin{ to{ transform: rotate(360deg) } }
+
+/* ── status pill ────────────────────────────────────────────────── */
+.pill{ display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border-radius:999px; font-size:11.5px; font-weight:600; letter-spacing:0.02em; text-transform:uppercase; background:var(--surface-2); color:var(--ink-2); border:1px solid var(--border) }
+.pill .dot{ width:7px; height:7px; border-radius:50%; background: currentColor }
+.pill.live{ color: var(--accent); border-color: oklch(0.78 0.14 155 / 0.45); background: oklch(0.78 0.14 155 / 0.10) }
+.pill.live .dot{ animation: pulse 1.6s ease-in-out infinite }
+@keyframes pulse{ 0%,100%{ opacity:1; box-shadow: 0 0 0 0 oklch(0.78 0.14 155 / 0.45); } 50%{ opacity:.6; box-shadow: 0 0 0 6px oklch(0.78 0.14 155 / 0) } }
+.pill.warn{ color: var(--warn); border-color: oklch(0.82 0.14 80 / 0.45); background: oklch(0.82 0.14 80 / 0.10) }
+.pill.err{ color: var(--danger); border-color: oklch(0.70 0.18 25 / 0.45); background: oklch(0.70 0.18 25 / 0.10) }
+
+/* ── identity block ─────────────────────────────────────────────── */
+.id{ display:flex; align-items:center; gap:12px; padding:10px 12px; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r) }
+.id .avatar{ width:34px; height:34px; border-radius:50%; background: linear-gradient(135deg, oklch(0.50 0.12 155), oklch(0.40 0.10 200)); color: oklch(0.96 0.02 155); font-weight:700; font-size:14px; display:grid; place-items:center; flex-shrink:0 }
+.id .meta{ display:flex; flex-direction:column; min-width:0; flex:1 }
+.id .user{ font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.id .fp{ color:var(--ink-2); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.id .actions{ flex-shrink:0 }
+
+/* ── call row ───────────────────────────────────────────────────── */
+.callrow{ display:flex; gap:8px; align-items:flex-end }
+.callrow .field{ flex:1; margin:0 }
+.callrow .btn{ height:38px; padding:0 16px }
+.msg{ margin-top:10px; font-size:12.5px; min-height:1.4em; color:var(--ink-2) }
+.msg.err{ color: var(--danger) }
+
+/* ── incoming call ─────────────────────────────────────────────── */
+.incoming{ text-align:center; padding:8px 0 }
+.incoming .who{ font-size:1.4rem; font-weight:600; margin:6px 0 2px }
+.incoming .sub{ color:var(--ink-2); font-size:12.5px; font-family:var(--mono) }
+.incoming .caller-avatar{ width:64px; height:64px; border-radius:50%; background:linear-gradient(135deg, oklch(0.55 0.12 155), oklch(0.45 0.10 200)); color:oklch(0.96 0.02 155); display:grid; place-items:center; margin:0 auto 8px; font-size:22px; font-weight:700; box-shadow: 0 0 0 4px oklch(0.78 0.14 155 / 0.15); animation: pulse 1.8s ease-in-out infinite }
+.incoming .actions{ display:flex; gap:10px; justify-content:center; margin-top:18px }
+.incoming .actions .btn{ min-width:120px }
+
+/* ── active call ────────────────────────────────────────────────── */
+.peer{ display:flex; align-items:center; gap:14px; padding:14px 16px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow: var(--shadow-1) }
+.peer .avatar{ width:44px; height:44px; border-radius:50%; background: linear-gradient(135deg, oklch(0.55 0.12 155), oklch(0.45 0.10 200)); color:oklch(0.96 0.02 155); font-weight:700; font-size:17px; display:grid; place-items:center; flex-shrink:0 }
+.peer .who{ display:flex; flex-direction:column; min-width:0; flex:1 }
+.peer .who .name{ font-weight:600 }
+.peer .who .sub{ color:var(--ink-2); font-size:12.5px; font-family:var(--mono) }
+.peer .status{ flex-shrink:0 }
+
+.viz{ height:36px; display:flex; align-items:center; justify-content:center; gap:3px; padding:0 4px; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r) }
+.viz .bar{ width:3px; height:4px; border-radius:2px; background:var(--accent); transform-origin:center; animation: viz 1.2s ease-in-out infinite }
+.viz .bar:nth-child(1){ animation-delay:0s } .viz .bar:nth-child(2){ animation-delay:.15s } .viz .bar:nth-child(3){ animation-delay:.3s } .viz .bar:nth-child(4){ animation-delay:.45s } .viz .bar:nth-child(5){ animation-delay:.6s } .viz .bar:nth-child(6){ animation-delay:.75s } .viz .bar:nth-child(7){ animation-delay:.9s } .viz .bar:nth-child(8){ animation-delay:1.05s }
+@keyframes viz{ 0%,100%{ transform:scaleY(0.4) } 50%{ transform:scaleY(2.6) } }
+
+.call-controls{ display:flex; gap:8px; justify-content:center; margin-top:6px }
+.call-controls .btn{ flex:1; max-width:140px }
+
+/* ── log panel ─────────────────────────────────────────────────── */
+details.log{ background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); overflow:hidden }
+details.log summary{ list-style:none; cursor:pointer; padding:12px 16px; color:var(--ink-2); font-size:12.5px; display:flex; align-items:center; gap:8px; user-select:none }
+details.log summary::-webkit-details-marker{ display:none }
+details.log summary .dot{ width:6px; height:6px; border-radius:50%; background:var(--ink-2) }
+details.log[open] summary .dot{ background:var(--accent) }
+details.log pre{ margin:0; padding:0 16px 14px; font-family:var(--mono); font-size:11px; line-height:1.5; color:oklch(0.72 0.04 155); max-height:180px; overflow:auto; white-space:pre-wrap; word-break:break-all }
+
+/* ── screen router ────────────────────────────────────────────── */
+[data-screen]{ display:none }
+[data-screen].is-on{ display:flex; flex-direction:column; gap:14px }
+.fade-in{ animation: fade var(--t) both }
+@keyframes fade{ from{ opacity:0; transform:translateY(4px) } to{ opacity:1; transform:none } }
+
+/* ── toast ─────────────────────────────────────────────────────── */
+.toast{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background: oklch(0.20 0.04 25); color:var(--ink); border:1px solid oklch(0.70 0.18 25 / 0.4); padding:10px 14px; border-radius:var(--r); font-size:13px; box-shadow: var(--shadow-2); animation: fade var(--t) both; max-width: calc(100% - 32px); z-index:50 }
+
+/* ── icons (inline svg) ────────────────────────────────────────── */
+.ic{ width:16px; height:16px; stroke:currentColor; stroke-width:1.75; fill:none; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0 }
+</style>
+</head>
+<body>
+<div class="app" role="application" aria-label="Silence">
+
+ <header class="brand">
+  <span class="mark" aria-hidden="true"></span>
+  <span class="name"><strong>Silence</strong> · encrypted calls</span>
+  <span class="pill" id="connPill" aria-live="polite"><span class="dot"></span><span id="connText">offline</span></span>
+ </header>
+
+ <!-- ── Auth ─────────────────────────────────────────────────── -->
+ <section data-screen="auth" class="is-on">
+  <div class="card">
+   <div class="card-title"><h2>Sign in</h2><span class="hint mono" id="relayHint"></span></div>
+   <form id="authForm" novalidate>
+    <div class="field"><label for="u">Username</label><div class="control"><input id="u" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="a–z, 0–9, _"></div></div>
+    <div class="field"><label for="p">Password</label><div class="control"><input id="p" type="password" autocomplete="current-password" placeholder="≤72 bytes"></div></div>
+    <div class="msg" id="authMsg" aria-live="polite"></div>
+    <div style="display:flex; gap:8px; margin-top:6px">
+     <button type="button" class="btn primary full" id="bLogin">Sign in</button>
+     <button type="button" class="btn full" id="bReg">Create account</button>
+    </div>
+   </form>
+  </div>
+ </section>
+
+ <!-- ── Main ─────────────────────────────────────────────────── -->
+ <section data-screen="main">
+  <div class="card">
+   <div class="card-title"><h2>Your identity</h2><span class="hint mono">X25519 fingerprint</span></div>
+   <div class="id">
+    <div class="avatar" id="meAvatar">?</div>
+    <div class="meta">
+     <span class="user" id="meUser">—</span>
+     <span class="fp mono" id="meFp">—</span>
+    </div>
+    <div class="actions"><button type="button" class="btn ghost" id="bOut">Sign out</button></div>
+   </div>
+  </div>
+  <div class="card">
+   <div class="card-title"><h2>Call someone by username</h2></div>
+   <form id="callForm" novalidate>
+    <div class="callrow">
+     <div class="field"><label for="callee">Username</label><div class="control"><input id="callee" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="who to call"></div></div>
+     <button type="button" class="btn primary" id="bCall">Call</button>
+    </div>
+    <div class="msg" id="callMsg" aria-live="polite"></div>
+   </form>
+  </div>
+ </section>
+
+ <!-- ── Incoming ─────────────────────────────────────────────── -->
+ <section data-screen="incoming" class="incoming">
+  <div class="card">
+   <div class="caller-avatar" id="callerAvatar">·</div>
+   <div class="who" id="callerName">—</div>
+   <div class="sub mono" id="callerSub">—</div>
+   <div class="msg" id="incomingMsg" style="margin-top:10px">Ringing…</div>
+   <div class="actions">
+    <button type="button" class="btn danger lg" id="bDecline">
+     <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"/><path d="M5 13c2 2 5 3 7 3s5-1 7-3"/><path d="M17 8l3-3"/><path d="M14 11l-3 3"/></svg>
+     Decline
+    </button>
+    <button type="button" class="btn success lg" id="bAccept">
+     <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 13c2 2 5 3 7 3s5-1 7-3"/><path d="M19 6l-7 7-3-3"/></svg>
+     Accept
+    </button>
+   </div>
+  </div>
+ </section>
+
+ <!-- ── Active call ─────────────────────────────────────────── -->
+ <section data-screen="call">
+  <div class="card" style="padding:0; overflow:hidden">
+   <div class="peer" style="border-radius:0; border:0; border-bottom:1px solid var(--border)">
+    <div class="avatar" id="peerAvatar">·</div>
+    <div class="who"><span class="name" id="peerName">—</span><span class="sub mono" id="peerSub">—</span></div>
+    <div class="status"><span class="pill" id="callPill"><span class="dot"></span><span id="callState">…</span></span></div>
+   </div>
+   <div style="padding:16px; display:flex; flex-direction:column; gap:14px">
+    <div class="viz" aria-hidden="true">
+     <span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span>
+     <span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span>
+    </div>
+    <div class="call-controls">
+     <button type="button" class="btn ghost" id="bMute" aria-pressed="false">
+      <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/><path d="M9 21h6"/></svg>
+      <span id="muteLabel">Mute</span>
+     </button>
+     <button type="button" class="btn danger" id="bHangup">
+      <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 13c2 2 5 3 7 3s5-1 7-3"/><path d="M21 13l-3-3-2 2"/></svg>
+      Hang up
+     </button>
+    </div>
+    <div class="msg" id="callMsg" style="text-align:center; color:var(--ink-2); font-family:var(--mono); font-size:12px" aria-live="polite"></div>
+   </div>
+  </div>
+ </section>
+
+ <details class="log" id="logDetails">
+  <summary><span class="dot" aria-hidden="true"></span>Activity</summary>
+  <pre id="log" aria-live="polite"></pre>
+ </details>
+
+</div>
+
+<audio id="remote" autoplay playsinline></audio>
+
+<script>
+/* ── state + DOM helpers ─────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+const log = (...a) => { const s = a.join(' '); const el=$('log'); el.textContent += s + '\n'; el.scrollTop = el.scrollHeight; };
+const toast = (msg, kind='err') => { const t = document.createElement('div'); t.className='toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 4200); };
+const show = name => document.querySelectorAll('[data-screen]').forEach(el => el.classList.toggle('is-on', el.dataset.screen === name));
+const setConn = (on, txt) => { $('connPill').classList.toggle('live', !!on); $('connText').textContent = txt || (on ? 'online' : 'offline'); };
+const setCall = (txt, kind='') => { $('callPill').className = 'pill' + (kind ? ' ' + kind : ''); $('callState').textContent = txt; };
+const setAuthErr = msg => { const el=$('authMsg'); el.textContent = msg||''; el.classList.toggle('err', !!msg); };
+const setCallErr = msg => { const el=$('callMsg'); el.textContent = msg||''; el.classList.toggle('err', !!msg); };
+
+/* ── audio: Web Audio ringtone + connected chime (no asset files) ─── */
+let audioCtx = null;
+const ensureAudio = () => { if (!audioCtx) try { audioCtx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){} };
+const ring = (on) => {
+ ensureAudio(); if (!audioCtx) return;
+ if (on) {
+  if (audioCtx._ringOsc) return; // already ringing
+  // two-tone US ring pattern via two oscillators
+  const o1 = audioCtx.createOscillator(), o2 = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o1.frequency.value = 440; o2.frequency.value = 480;
+  o1.connect(g); o2.connect(g); g.connect(audioCtx.destination);
+  g.gain.value = 0;
+  g.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 0.02);
+  audioCtx._ringOsc = { o1, o2, g, timer: null };
+  // pulse: 1s on, 3s off, repeat (2s audible per cycle)
+  const pulse = () => { const t = audioCtx.currentTime; g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.08, t + 0.02); g.gain.linearRampToValueAtTime(0, t + 0.9); };
+  pulse();
+  audioCtx._ringOsc.timer = setInterval(pulse, 4000);
+ } else {
+  if (audioCtx && audioCtx._ringOsc) {
+  const { o1, o2, g, timer } = audioCtx._ringOsc;
+  clearInterval(timer);
+  try { g.gain.cancelScheduledValues(audioCtx.currentTime); g.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.05); } catch{}
+  setTimeout(() => { try{ o1.stop(); o2.stop(); }catch{} }, 120);
+  audioCtx._ringOsc = null;
+  }
+ }
+};
+const chime = (freqs) => {
+ ensureAudio(); if (!audioCtx) return;
+ const t = audioCtx.currentTime;
+ freqs.forEach((f, i) => { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.frequency.value = f; o.connect(g); g.connect(audioCtx.destination); g.gain.setValueAtTime(0, t + i*0.12); g.gain.linearRampToValueAtTime(0.06, t + i*0.12 + 0.02); g.gain.linearRampToValueAtTime(0, t + i*0.12 + 0.25); o.start(t + i*0.12); o.stop(t + i*0.12 + 0.3); });
+};
+
+/* ── MessagePack codec (maps of string→string|int) ────────────────── */
+const enc=new TextEncoder(), dec=new TextDecoder();
+const pStr=s=>{const b=enc.encode(s),n=b.length;if(n<32)return[0xa0|n,...b];if(n<256)return[0xd9,n,...b];return[0xda,(n>>8)&255,n&255,...b]};
+const pVal=v=>{if(typeof v==='string')return pStr(v);if(typeof v==='number'&&Number.isInteger(v)&&v>=0&&v<128)return[v];throw new Error('bad val')};
+const pack=o=>{const ks=Object.keys(o),out=[0x80|ks.length];for(const k of ks){out.push(...pStr(k));out.push(...pVal(o[k]))}return new Uint8Array(out)};
+const unpack=b=>{let i=0;const rd=()=>{const t=b[i];if(t>=0xa0&&t<=0xbf){const n=t&0x1f;i++;return dec.decode(b.subarray(i,i+=n))}if(t===0xd9){const n=b[i+1];i+=2;return dec.decode(b.subarray(i,i+=n))}if(t===0xda){const n=(b[i+1]<<8)|b[i+2];i+=3;return dec.decode(b.subarray(i,i+=n))}if(t<=127){return i++,t}if(t>=0x80&&t<=0x8f){const n=t&0x0f;i++;const m={};for(let k=0;k<n;k++)m[rd()]=rd();return m}if(t===0xcc){i+=2;return b[i-1]}throw new Error('tag '+t+' @'+i)};return rd()};
+
+const RELAY = (location.protocol==='https:'?'wss://':'ws://') + (location.hostname||'localhost') + ':' + (location.port || (location.protocol==='https:'?'443':'80')) + '/ws';
+$('relayHint').textContent = RELAY.replace(/^wss?:\/\//,'');
+
+const MY_FP_KEY = 'silence.identity.fp';
+const makeFP = () => Array.from(crypto.getRandomValues(new Uint8Array(32)), b=>b.toString(16).padStart(2,'0')).join('').slice(0,16);
+const getOrCreateIdentity = () => { let fp = localStorage.getItem(MY_FP_KEY); if(!fp){ fp = makeFP(); localStorage.setItem(MY_FP_KEY, fp); } return fp; };
+
+/* ── WebSocket + auto-reconnect ─────────────────────────────────── */
+let ws = null, me = null, pc = null, room = null, localStream = null, muted = false, intentionalClose = false;
+let reconnectAttempt = 0, reconnectTimer = null;
+let lastAuth = null; // { type:'login'|'register_user', payload:{...} } for resume on reconnect
+
+function send(o){ if(!ws || ws.readyState!==WebSocket.OPEN) return; ws.send(pack(o)); log('→', JSON.stringify(o).slice(0,140)); }
+
+function connectWS(){
+ intentionalClose = false;
+ if (ws && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING)) return;
+ ws = new WebSocket(RELAY);
+ ws.binaryType='arraybuffer';
+ ws.onopen = () => {
+  setConn(true);
+  log('ws open');
+  reconnectAttempt = 0;
+  // resume auth after reconnect
+  if (lastAuth) send(lastAuth);
+ };
+ ws.onclose = () => {
+  setConn(false);
+  log('ws closed');
+  if (intentionalClose || me == null) return; // signed out or never authed
+  // schedule reconnect
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  const delay = Math.min(1000 * (2 ** reconnectAttempt), 10000);
+  reconnectAttempt++;
+  log(`reconnect in ${delay}ms (attempt ${reconnectAttempt})`);
+  reconnectTimer = setTimeout(connectWS, delay);
+ };
+ ws.onerror = e => log('ws err', e?.message || e);
+ ws.onmessage = async ev => {
+  const m = unpack(new Uint8Array(ev.data));
+  if (!m || !m.type) return;
+  if (['offer','answer','ice','hangup'].includes(m.type)) return handleSignal(m);
+  switch (m.type) {
+   case 'registered':
+   case 'logged_in':
+    me = { username: m.username || lastAuth?.username };
+    onAuthed();
+    break;
+   case 'created':
+    room = m.room; startOutbound(); break;
+   case 'incoming':
+    onIncoming(m);
+    break;
+   case 'error':
+    toast(m.message || 'error');
+    setAuthErr(m.message); setCallErr(m.message);
+    if (m.message && /target offline|no push token|not found/i.test(m.message)) {
+     stopRinging(); // stop caller-side ring
+    }
+    break;
+  }
+  log('←', JSON.stringify(m).slice(0,160));
+ };
+}
+
+/* ── identity / UI sync ─────────────────────────────────────────── */
+function onAuthed(){
+ show('main');
+ $('meUser').textContent = me.username;
+ const fp = getOrCreateIdentity();
+ $('meFp').textContent = fp;
+ $('meAvatar').textContent = (me.username||'?').slice(0,1).toUpperCase();
+}
+function setPeer(prefix, fpOrName, sub){
+ const name = fpOrName.slice(0,1).toUpperCase() + fpOrName.slice(1,8);
+ $('peerName').textContent = name;
+ $('peerSub').textContent = 'fingerprint · ' + fpOrName.slice(0,8);
+ $('peerAvatar').textContent = (name[0]||'?').toUpperCase();
+ $('callerName').textContent = name;
+ $('callerSub').textContent = fpOrName.slice(0,16);
+ $('callerAvatar').textContent = (name[0]||'?').toUpperCase();
+}
+
+/* ── auth ─────────────────────────────────────────────────────────── */
+function validUser(s){ return /^[a-z0-9_]{1,32}$/.test(s); }
+function doAuth(action){
+ setAuthErr('');
+ const username = $('u').value.trim().toLowerCase();
+ const password = $('p').value;
+ if (!validUser(username)) return setAuthErr('Username must be a–z, 0–9, _ (≤32 chars).');
+ if (!password) return setAuthErr('Password required.');
+ if (password.length > 72) return setAuthErr('Password must be ≤72 bytes.');
+ const btn = action==='login' ? $('bLogin') : $('bReg');
+ btn.disabled = true; btn.innerHTML = '<span class="spinner" aria-hidden="true"></span>';
+ const payload = { username, password, fingerprint: getOrCreateIdentity() };
+ if (action==='login') delete payload.fingerprint; // login doesn't need fp
+ const msg = action==='login'
+  ? { type:'login', username, password }
+  : { type:'register_user', ...payload };
+ lastAuth = msg; // for reconnect
+
+ if (!ws || ws.readyState!==WebSocket.OPEN) { connectWS(); }
+ const trySend = () => { if(!ws || ws.readyState!==WebSocket.OPEN) return setTimeout(trySend, 80); send(msg); };
+ trySend();
+ setTimeout(() => { btn.disabled = false; btn.textContent = action==='login' ? 'Sign in' : 'Create account'; }, 6000);
+}
+$('bLogin').onclick = () => doAuth('login');
+$('bReg').onclick = () => doAuth('register');
+$('bOut').onclick = () => { intentionalClose = true; try{ws?.close();}catch{}; ws=null; me=null; lastAuth=null; show('auth'); setConn(false); };
+
+/* ── call: caller side (ringing → connected) ────────────────────── */
+let callTimer = null, callStart = 0;
+function startCallTimer(){ stopCallTimer(); callStart = Date.now(); const tick = () => { const s = Math.floor((Date.now()-callStart)/1000); const mm = String(Math.floor(s/60)).padStart(2,'0'); const ss = String(s%60).padStart(2,'0'); $('callMsg').textContent = mm + ':' + ss; if (pc) callTimer = setTimeout(tick, 500); }; tick(); }
+function stopCallTimer(){ if (callTimer) clearTimeout(callTimer); callTimer = null; $('callMsg').textContent = ''; }
+function stopRinging(){ ring(false); }
+function muteTracks(on){ muted = on; if (localStream) localStream.getAudioTracks().forEach(t => t.enabled = !on); $('muteLabel').textContent = on ? 'Unmute' : 'Mute'; $('bMute').setAttribute('aria-pressed', String(on)); $('bMute').classList.toggle('primary', on); }
+
+function doCall(){
+ setCallErr('');
+ const target = $('callee').value.trim().toLowerCase();
+ if (!validUser(target)) return setCallErr('Enter a valid username to call.');
+ if (target === (me?.username||'')) return setCallErr("That's you — can't call yourself.");
+ if (!ws || ws.readyState!==WebSocket.OPEN) { connectWS(); setTimeout(doCall, 200); return; }
+ show('call'); setPeer('them', target); setCall('ringing…', 'warn');
+ ring(true);
+ send({ type:'call_user', username: target });
+}
+
+$('bCall').onclick = doCall;
+$('callee').addEventListener('keydown', e => { if (e.key==='Enter') doCall(); });
+
+/* ── call: callee side (incoming → ring → accept/decline) ──────── */
+let pendingIncoming = null;
+function onIncoming(m){
+ pendingIncoming = m;
+ show('incoming');
+ setPeer('them', m.from);
+ $('callerName').textContent = m.from.slice(0,1).toUpperCase() + m.from.slice(1,8);
+ $('callerSub').textContent = m.from.slice(0,16);
+ $('callerAvatar').textContent = (m.from[0]||'?').toUpperCase();
+ $('incomingMsg').textContent = 'Ringing…';
+ ring(true);
+}
+$('bAccept').onclick = () => { if (pendingIncoming) { ring(false); acceptCall(); } };
+$('bDecline').onclick = () => { ring(false); if (pendingIncoming) { send({ type:'hangup', room: pendingIncoming.room }); } pendingIncoming = null; show('main'); setCallErr('Declined.'); };
+
+/* ── WebRTC ─────────────────────────────────────────────────────── */
+async function newPC(){
+ pc = new RTCPeerConnection({ iceServers:[{urls:'stun:stun.l.google.com:19302'}] });
+ pc.addTransceiver('audio', {direction:'sendrecv'});
+ pc.onicecandidate = e => { if(e.candidate) send({type:'ice', sdpMid:e.candidate.sdpMid||'0', sdpMLineIndex: e.candidate.sdpMLineIndex ?? 0, candidate:e.candidate.candidate, room}); };
+ pc.oniceconnectionstatechange = () => {
+  const s = pc.iceConnectionState;
+  setCall(s, s==='connected'||s==='completed'?'live':(s==='failed'?'err':''));
+  if (s==='connected' || s==='completed'){ ring(false); chime([880, 1320]); startCallTimer(); }
+  if (s==='failed' || s==='closed'){ ring(false); stopCallTimer(); }
+ };
+ pc.ontrack = e => { $('remote').srcObject = e.streams[0]; };
+ try { localStream = await navigator.mediaDevices.getUserMedia({audio:true, video:false}); localStream.getTracks().forEach(t => { t.enabled = !muted; pc.addTrack(t, localStream); }); } catch(e){ log('mic:', e.message); }
+}
+
+async function startOutbound(){
+ await newPC();
+ const offer = await pc.createOffer();
+ await pc.setLocalDescription(offer);
+ send({type:'offer', sdp:offer.sdp, room});
+}
+
+async function acceptCall(){
+ if (!pendingIncoming) return;
+ room = pendingIncoming.room;
+ await newPC();
+ send({type:'accept', room});
+ pendingIncoming = null;
+}
+
+
+async function handleSignal(m){
+ if (m.type === 'offer'){
+  if (!pc) await newPC();
+  await pc.setRemoteDescription({type:'offer', sdp:m.sdp});
+  const ans = await pc.createAnswer();
+  await pc.setLocalDescription(ans);
+  send({type:'answer', sdp:ans.sdp, room});
+  setCall('connecting…');
+ } else if (m.type === 'answer'){
+  if (pc) await pc.setRemoteDescription({type:'answer', sdp:m.sdp});
+ } else if (m.type === 'ice'){
+  if (pc) try{ await pc.addIceCandidate({candidate:m.candidate, sdpMid:m.sdpMid, sdpMLineIndex:m.sdpMLineIndex}); }catch{}
+ } else if (m.type === 'hangup'){
+  log('remote hung up');
+  endCall();
+ }
+}
+
+/* ── hangup / end ───────────────────────────────────────────────── */
+function endCall(){
+ stopRinging(); stopCallTimer();
+ try{ pc?.getSenders().forEach(s => s.track && s.track.stop && s.track.stop()); }catch{}
+ try{ localStream?.getTracks().forEach(t => t.stop()); }catch{}
+ try{ pc?.close(); }catch{}
+ pc = null; localStream = null; room = null; pendingIncoming = null; muted = false;
+ show('main'); setCallErr(''); $('callMsg').textContent='';
+}
+$('bHangup').onclick = () => { try{ if(room) send({type:'hangup', room}); }catch{} endCall(); chime([440, 220]); };
+$('bMute').onclick = () => muteTracks(!muted);
+
+/* ── bootstrap ────────────────────────────────────────────────── */
+log('Silence web ready — relay:', RELAY);
+connectWS();
+
+/* resume on reconnect: when ws opens, send lastAuth */
+</script>
+</body>
+</html>
+q

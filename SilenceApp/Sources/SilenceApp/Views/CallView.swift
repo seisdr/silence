@@ -25,9 +25,9 @@ struct CallView: View {
                 Text(statusText).foregroundColor(.white.opacity(0.85))
 
                 // E2EE fingerprint
-                if let fp = vm.e2eeFingerprint, !vm.e2eeVerified, vm.callState == .connected {
+                if let fp = vm.e2eeFingerprint, vm.callState == .connected {
                     VStack {
-                        Text("Remote fingerprint").font(.caption).foregroundColor(.white.opacity(0.7))
+                        Text("Security code").font(.caption).foregroundColor(.white.opacity(0.7))
                         Text(fp).font(.body.monospaced()).foregroundColor(.white)
                     }
                     .padding()
@@ -89,7 +89,7 @@ struct CallView: View {
         case .ringing: return "Incoming call"
         case .ended: return "Call ended"
         case .connected where vm.e2eeVerified: return "E2E Encrypted · Verified"
-        case .connected: return "Encrypted · Verifying…"
+        case .connected: return "Encrypted · Identity unknown"
         default: return ""
         }
     }

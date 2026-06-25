@@ -8,7 +8,7 @@ class SignalingClient: ObservableObject {
     private var task: URLSessionWebSocketTask?
     private var roomId: String?
 
-    @Published var events: AsyncStream<SignalingEvent> = AsyncStream { _ in }
+    @Published var events: AsyncStream<SignalingEvent>
     private var eventContinuation: AsyncStream<SignalingEvent>.Continuation?
 
     enum SignalingEvent {
@@ -26,16 +26,20 @@ class SignalingClient: ObservableObject {
         case disconnected
     }
 
+    init() {
+        // Create the event stream ONCE. Replacing `events` on connect (as the
+        // old code did) orphaned observers that captured the stream at
+        // AppViewModel init time, so signaling events were never delivered.
+        var continuation: AsyncStream<SignalingEvent>.Continuation!
+        events = AsyncStream { cont in continuation = cont }
+        eventContinuation = continuation
+    }
+
     func connect(url: String) {
         disconnect()
         guard let wsURL = URL(string: url) else { return }
         task = URLSession.shared.webSocketTask(with: wsURL)
         task?.resume()
-
-        var localContinuation: AsyncStream<SignalingEvent>.Continuation!
-        events = AsyncStream { cont in localContinuation = cont }
-        eventContinuation = localContinuation
-
         receiveLoop()
     }
 

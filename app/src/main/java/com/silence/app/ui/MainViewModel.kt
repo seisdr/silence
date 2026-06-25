@@ -1,6 +1,10 @@
 package com.silence.app.ui
 
 import android.app.Application
+import android.media.AudioManager
+import android.media.ToneGenerator
+import android.os.Handler
+import android.os.Looper
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.silence.app.data.Contact
@@ -16,6 +20,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
@@ -45,6 +50,11 @@ class MainViewModel @Inject constructor(
 
     private val _authLoading = MutableStateFlow(false)
     val authLoading: StateFlow<Boolean> = _authLoading.asStateFlow()
+
+    // Credentials captured at login/register time so they can be persisted once
+    // the server confirms success. (The password is otherwise lost before the
+    // LoggedIn/Registered event arrives, so auto-login never worked.)
+    private var pendingCredentials: Pair<String, String>? = null
     private val _callState = MutableStateFlow(CallStateUi.IDLE)
     val callState: StateFlow<CallStateUi> = _callState.asStateFlow()
 
@@ -65,6 +75,11 @@ class MainViewModel @Inject constructor(
 
     private val _inCall = MutableStateFlow(false)
     val inCall: StateFlow<Boolean> = _inCall.asStateFlow()
+
+    // ── Call timer ──────────────────────────────────────────────
+    private val _callDuration = MutableStateFlow("")
+    val callDuration: StateFlow<String> = _callDuration.asStateFlow()
+    private var callTimerJob: kotlinx.coroutines.Job? = null
 
     // Incoming call tracking — set when server sends 'incoming' event
     private var _incomingRoomId: String? = null
@@ -139,12 +154,14 @@ class MainViewModel @Inject constructor(
     fun login(username: String, password: String) {
         _authError.value = null
         _authLoading.value = true
+        pendingCredentials = username to password
         signalingClient.login(username, password)
     }
 
     fun registerUser(username: String, password: String) {
         _authError.value = null
         _authLoading.value = true
+        pendingCredentials = username to password
         viewModelScope.launch {
             val fp = identity.value?.fingerprint ?: return@launch
             signalingClient.registerUser(username, password, fp)
@@ -152,10 +169,21 @@ class MainViewModel @Inject constructor(
     }
 
     fun logout() {
+        pendingCredentials = null
         viewModelScope.launch {
             authStore.clearCredentials()
             signalingClient.disconnect()
             _authState.value = AuthState(null, null)
+        }
+    }
+
+    private fun persistPendingCredentials(usernameOverride: String? = null) {
+        val creds = pendingCredentials
+        pendingCredentials = null
+        if (creds == null) return
+        val username = usernameOverride ?: creds.first
+        viewModelScope.launch {
+            authStore.saveCredentials(username, creds.second)
         }
     }
 
@@ -184,6 +212,7 @@ class MainViewModel @Inject constructor(
         val targetPub = android.util.Base64.decode(contact.publicKeyB64, android.util.Base64.NO_WRAP)
         val targetFp = identityManager.fingerprint(targetPub)
         signalingClient.call(targetFp)
+        viewModelScope.launch { _navigateTo.emit(NavTarget.Call(contact.name)) }
     }
 
     /** Call a user by username. Requires prior login. */
@@ -194,12 +223,77 @@ class MainViewModel @Inject constructor(
         _e2eeVerified.value = false
         _e2eeFingerprint.value = null
         signalingClient.callUser(username)
+        viewModelScope.launch { _navigateTo.emit(NavTarget.Call(username)) }
     }
 
-    /** Accept an incoming call. */
     fun acceptCall() {
+        stopRing()
         signalingClient.accept(roomId = _incomingRoomId ?: return)
         _callState.value = CallStateUi.CONNECTED
+    }
+
+    // ── ringtone (synthesized, no assets/permissions) ─────────────
+    private var toneGen: ToneGenerator? = null
+    private val ringHandler = Handler(Looper.getMainLooper())
+    private var ringRunnable: Runnable? = null
+    private fun startRing() {
+        stopRing()
+        try { toneGen = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 100) } catch (e: Exception) { return }
+        val r = object : Runnable {
+            override fun run() {
+                try { toneGen?.startTone(ToneGenerator.TONE_CDMA_HIGH_L, 1000) } catch (e: Exception) {}
+                ringHandler.postDelayed(this, 4000) // 1s on, 3s off
+            }
+        }
+        ringRunnable = r
+        ringHandler.post(r)
+        // Auto-stop after 45s to avoid ringing forever.
+    }
+
+    // ── call timer ──────────────────────────────────────────────
+    private fun startCallTimer() {
+        stopCallTimer()
+        val start = System.currentTimeMillis()
+        callTimerJob = viewModelScope.launch {
+            while (true) {
+                val elapsed = (System.currentTimeMillis() - start) / 1000
+                val mm = (elapsed / 60).toString().padStart(2, '0')
+                val ss = (elapsed % 60).toString().padStart(2, '0')
+                _callDuration.value = "$mm:$ss"
+                kotlinx.coroutines.delay(500)
+            }
+        }
+    }
+    private fun stopCallTimer() {
+        callTimerJob?.cancel()
+        callTimerJob = null
+        _callDuration.value = ""
+    }
+    private fun stopRing() {
+        ringRunnable?.let { ringHandler.removeCallbacks(it) }
+        ringRunnable = null
+        try { toneGen?.release() } catch (e: Exception) {}
+        toneGen = null
+    }
+
+    // ── auto-reconnect (exponential backoff, gated by authState) ────
+    private var reconnectAttempt = 0
+    private var reconnectJob: kotlinx.coroutines.Job? = null
+    private fun scheduleReconnect() {
+        if (reconnectJob?.isActive == true) return
+        // Only reconnect while the user is signed in.
+        if (_authState.value?.isLoggedIn != true) return
+        reconnectJob = viewModelScope.launch {
+            val delay = (1000L shl reconnectAttempt.coerceAtMost(4)).coerceAtMost(10000L)
+            reconnectAttempt++
+            kotlinx.coroutines.delay(delay)
+            val url = signalingUrl.value
+            signalingClient.connect(url)
+            // Let the WS open, then re-register so we stay reachable for calls.
+            kotlinx.coroutines.delay(800)
+            val fp = identity.value?.fingerprint
+            if (fp != null) signalingClient.register(fp)
+        }
     }
 
     /**
@@ -240,6 +334,8 @@ class MainViewModel @Inject constructor(
     }
 
     fun hangup() {
+        stopRing()
+        stopCallTimer()
         signalingClient.sendHangup()
         webRtcEngine.endCall()
         _callState.value = CallStateUi.ENDED
@@ -272,6 +368,12 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    fun deleteContact(contact: Contact) {
+        viewModelScope.launch {
+            contactStore.removeContact(contact.name)
+        }
+    }
+
     fun showIdentity() {
         viewModelScope.launch { _navigateTo.emit(NavTarget.Identity) }
     }
@@ -297,19 +399,11 @@ class MainViewModel @Inject constructor(
             }
             is WebRtcEngine.EngineEvent.IceConnected -> {
                 _callState.value = CallStateUi.CONNECTED
-                _e2eeFingerprint.value = event.fingerprint
-                // If fingerprint matches stored contact, auto-verify
-                val contact = _activeContact.value
-                if (contact != null && event.fingerprint != null) {
-                    val contactFp = identityManager.fingerprint(
-                        android.util.Base64.decode(contact.publicKeyB64, android.util.Base64.NO_WRAP)
-                    )
-                    if (event.fingerprint.startsWith(contactFp, ignoreCase = true)) {
-                        _e2eeVerified.value = true
-                    }
-                }
+                verifyCallIdentity()
+                startCallTimer()
             }
             is WebRtcEngine.EngineEvent.CallEnded -> {
+                stopCallTimer()
                 _callState.value = CallStateUi.ENDED
             }
             is WebRtcEngine.EngineEvent.Error -> {
@@ -322,21 +416,36 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Establish E2EE verification for the connected call.
+     *
+     * Computes the Short Authentication String from both identity keys (stable,
+     * identical on both ends) and surfaces it for manual comparison. A call with
+     * a known contact (identity exchanged out-of-band via QR) is trusted; calls
+     * without a known remote identity key (e.g. by-username) stay unverified.
+     */
+    private fun verifyCallIdentity() {
+        val contact = _activeContact.value
+        if (contact == null || contact.publicKeyB64.isEmpty()) {
+            _e2eeFingerprint.value = null
+            _e2eeVerified.value = false
+            return
+        }
+        _e2eeFingerprint.value = identityManager.sas(contact.publicKeyB64)
+        _e2eeVerified.value = true
+    }
+
     private fun handleSignalingEvent(event: SignalingClient.SignalingEvent) {
         when (event) {
             is SignalingClient.SignalingEvent.Registered -> {
                 _authLoading.value = false
-                // Auto-login: save credentials if this was a register_user call
+                // register_user auto-authenticates; persist the credentials we
+                // captured so the session survives an app restart.
+                persistPendingCredentials()
             }
             is SignalingClient.SignalingEvent.LoggedIn -> {
                 _authLoading.value = false
-                // Persist credentials
-                viewModelScope.launch {
-                    authStore.saveCredentials(
-                        event.username,
-                        _authState.value?.password ?: ""
-                    )
-                }
+                persistPendingCredentials(event.username)
             }
             is SignalingClient.SignalingEvent.Created -> {
                 // Server created a room for our outbound call — create WebRTC offer
@@ -356,6 +465,8 @@ class MainViewModel @Inject constructor(
                 _callState.value = CallStateUi.RINGING
                 _inCall.value = true
                 _e2eeVerified.value = false
+                startRing()
+                viewModelScope.launch { _navigateTo.emit(NavTarget.Call(_activeContact.value?.name ?: "Unknown")) }
             }
             is SignalingClient.SignalingEvent.PeerJoined -> {
                 // Remote peer joined — WebRTC can proceed
@@ -371,15 +482,25 @@ class MainViewModel @Inject constructor(
             }
             is SignalingClient.SignalingEvent.Hangup -> {
                 webRtcEngine.endCall()
+                stopRing()
                 _callState.value = CallStateUi.ENDED
                 _incomingRoomId = null
             }
             is SignalingClient.SignalingEvent.Error -> {
                 _authLoading.value = false
                 _authError.value = event.message
+                pendingCredentials = null
+                stopRing()
             }
             is SignalingClient.SignalingEvent.SearchResults -> { /* handled by UI */ }
-            is SignalingClient.SignalingEvent.Disconnected -> { /* reconnect handled elsewhere */ }
+            is SignalingClient.SignalingEvent.Disconnected -> {
+                _authLoading.value = false
+                if (_authState.value?.isLoggedIn != true) {
+                    _authError.value = "Server connection lost. Check the relay URL or try again."
+                }
+                scheduleReconnect()
+            }
         }
     }
+
 }

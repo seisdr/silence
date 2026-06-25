@@ -23,9 +23,9 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
-    private val audioPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted -> }
+    private val permissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ -> }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestPermissions()
@@ -46,6 +46,7 @@ class MainActivity : ComponentActivity() {
                 val authState by viewModel.authState.collectAsStateWithLifecycle()
                 val authError by viewModel.authError.collectAsStateWithLifecycle()
                 val authLoading by viewModel.authLoading.collectAsStateWithLifecycle()
+                val callDuration by viewModel.callDuration.collectAsStateWithLifecycle()
                 // Simple screen routing based on state
                 var screen by remember { mutableStateOf<Screen>(Screen.Identity) }
                 var scannedKey by remember { mutableStateOf<String?>(null) }
@@ -109,7 +110,8 @@ class MainActivity : ComponentActivity() {
                             onCall = { contact -> viewModel.callContact(contact) },
                             onCallUser = { username -> viewModel.callByUsername(username) },
                             onAddContact = { screen = Screen.Scanner },
-                            onViewIdentity = { screen = Screen.Identity }
+                            onViewIdentity = { screen = Screen.Identity },
+                            onDeleteContact = { contact -> viewModel.deleteContact(contact) }
                         )
                     }
                     Screen.Scanner -> {
@@ -128,6 +130,7 @@ class MainActivity : ComponentActivity() {
                             e2eeFingerprint = e2eeFp,
                             muted = muted,
                             speakerOn = speakerOn,
+                            callDuration = callDuration,
                             onHangup = { viewModel.hangup() },
                             onToggleMute = { viewModel.toggleMute() },
                             onToggleSpeaker = { viewModel.toggleSpeaker() },
@@ -218,7 +221,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (needed.isNotEmpty()) {
-            audioPermissionLauncher.launch(needed.first())
+            permissionsLauncher.launch(needed.toTypedArray())
         }
     }
 }

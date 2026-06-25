@@ -2,6 +2,8 @@
 set -euo pipefail
 RELAY_PORT="${PORT:-8088}"
 
+# Clean state from previous runs
+rm -f server/users.json server/users.json.bak
 # Start relay
 pkill -f "silence-signaling.*:$RELAY_PORT" 2>/dev/null || true
 sleep 0.3

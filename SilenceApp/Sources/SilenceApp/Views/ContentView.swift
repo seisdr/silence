@@ -16,7 +16,7 @@ struct ContentView: View {
                 } else {
                     LoginView(vm: vm, screen: $screen)
                 }
-            } else if screen == .identity || vm.contacts.isEmpty {
+            } else if screen == .identity {
                 IdentityView(vm: vm, screen: $screen)
             } else if screen == .call {
                 CallView(vm: vm, screen: $screen)
